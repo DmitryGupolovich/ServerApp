@@ -30,10 +30,10 @@ namespace WebApplication.ServiceModel
             this.dbConnectionFactory = dbConnectionFactory;
             this.url = url;
             CrawlConfiguration crawlConfig = new CrawlConfiguration();
-            crawlConfig.CrawlTimeoutSeconds = 100;
-            crawlConfig.MaxConcurrentThreads = 5;
-            crawlConfig.MaxPagesToCrawl = 4;
-            crawlConfig.MaxCrawlDepth = 1;
+            crawlConfig.CrawlTimeoutSeconds = 0;
+            crawlConfig.MaxConcurrentThreads = 20;
+            crawlConfig.MaxPagesToCrawl = 300;
+            crawlConfig.MaxCrawlDepth = 100;
 
             crawler = new PoliteWebCrawler(crawlConfig, null, null, null, null, null, null, null, null);
 
@@ -76,102 +76,111 @@ namespace WebApplication.ServiceModel
                 new HelloResponse { Result = $"Crawl of page succeeded {uri}!" };
 
             var htmlAgilityPackDocument = crawledPage.HtmlDocument; //Html Agility Pack parser
+
             Extract(e, htmlAgilityPackDocument);
         }
         void Extract(PageCrawlCompletedArgs page, HtmlDocument htmlAgilityPackDocument)
         {
-            DateTime date = default(DateTime);
-            string HeaderArticle = "", articleText = "", entityText = ""; 
-            var t2 = htmlAgilityPackDocument.DocumentNode.SelectSingleNode("//div[@class='news-detail']");
-            if (t2 != null)
+            try
             {
-                // You need to add an * to the xpath. The * means you want to select any element.
-                // With an xpath query you can also use "." to indicate the search should start at the current node.
-                HtmlNode HeaderArticleNode = t2.SelectSingleNode(".//*[@class='name']");
-                if (HeaderArticleNode != null)
+                DateTime date = default(DateTime);
+                string HeaderArticle = "", articleText = "", entityText = "";
+                var t2 = htmlAgilityPackDocument.DocumentNode.SelectSingleNode("//div[@class='news-detail']");
+                if (t2 != null)
                 {
-                    HeaderArticle = HeaderArticleNode.InnerText;
-                }
-
-                HtmlNode TextNode = t2.SelectSingleNode(".//*[@id='detailText']");
-                if (TextNode != null)
-                {
-                    articleText = TextNode.InnerText;
-
-
-                    ProcessorService.Initialize(MorphLang.RU | MorphLang.EN);
-                    EP.Ner.Geo.GeoAnalyzer.Initialize();
-                    EP.Ner.Org.OrganizationAnalyzer.Initialize();
-                    EP.Ner.Person.PersonAnalyzer.Initialize();
-
-                    //// создаём экземпляр обычного процессора
-                    using (Processor proc = ProcessorService.CreateProcessor())
+                    // You need to add an * to the xpath. The * means you want to select any element.
+                    // With an xpath query you can also use "." to indicate the search should start at the current node.
+                    HtmlNode HeaderArticleNode = t2.SelectSingleNode(".//*[@class='name']");
+                    if (HeaderArticleNode != null)
                     {
-                        // анализируем текст
-                        AnalysisResult ar = proc.Process(new SourceOfAnalysis(articleText));
+                        HeaderArticle = HeaderArticleNode.InnerText;
+                    }
 
-                        // результирующие сущности
-                        foreach (var e in ar.Entities)
+                    HtmlNode TextNode = t2.SelectSingleNode(".//*[@id='detailText']");
+                    if (TextNode != null)
+                    {
+                        articleText = TextNode.InnerText;
+
+
+                        ProcessorService.Initialize(MorphLang.RU | MorphLang.EN);
+                        EP.Ner.Geo.GeoAnalyzer.Initialize();
+                        EP.Ner.Org.OrganizationAnalyzer.Initialize();
+                        EP.Ner.Person.PersonAnalyzer.Initialize();
+
+                        //// создаём экземпляр обычного процессора
+                        using (Processor proc = ProcessorService.CreateProcessor())
                         {
-                            //  if (e.GetType().Name.Equals("GeoReferent"))
-                            //e.GetType().Name + " " + e;
-                            //entityText += entityText;
-                            entityText += e.ToString()+" ";
+                            // анализируем текст
+                            AnalysisResult ar = proc.Process(new SourceOfAnalysis(articleText));
+
+                            // результирующие сущности
+                            foreach (var e in ar.Entities)
+                            {
+                                //  if (e.GetType().Name.Equals("GeoReferent"))
+                                //e.GetType().Name + " " + e;
+                                //entityText += entityText;
+                                entityText += e.ToString() + " ";
+                            }
+                        }
+
+
+                    }
+
+                    /*
+                    // Вариант с перебором всех дочерних узлов и использованием Descendants
+                    HtmlNodeCollection childNodes = t2.ChildNodes;
+                    foreach (var nNode in childNodes.Descendants("h1"))
+                    {
+                        if (nNode.NodeType == HtmlNodeType.Element)
+                        {
+                            name = nNode.InnerText;
                         }
                     }
+                    */
 
 
                 }
+                htmlAgilityPackDocument.DocumentNode.SelectNodes("//style|//script").ToList().ForEach(n => n.Remove());
 
-                /*
-                // Вариант с перебором всех дочерних узлов и использованием Descendants
-                HtmlNodeCollection childNodes = t2.ChildNodes;
-                foreach (var nNode in childNodes.Descendants("h1"))
+                var xpath = "//text()[not(normalize-space())]";
+                var emptyNodes = htmlAgilityPackDocument.DocumentNode.SelectNodes(xpath);
+
+                //replace each and all empty text nodes with single new-line text node
+                foreach (HtmlNode emptyNode in emptyNodes)
                 {
-                    if (nNode.NodeType == HtmlNodeType.Element)
+                    emptyNode.ParentNode
+                             .ReplaceChild(HtmlTextNode.CreateNode(Environment.NewLine)
+                                            , emptyNode
+                                           );
+                }
+
+                string FullText = htmlAgilityPackDocument.DocumentNode.InnerHtml.AsString();
+
+                var bla = htmlAgilityPackDocument.DocumentNode.SelectSingleNode("//span[@class='news-date-time news_date']");
+                if (bla != null)
+                {
+                    bla.InnerHtml.ToString();
+                    date = DateTime.Parse(bla.InnerText);
+                }
+                if (HeaderArticle != "" & articleText != "")
+                {
+                    using (var db = dbConnectionFactory.OpenDbConnection())
                     {
-                        name = nNode.InnerText;
+                        db.Insert(new Article()
+                        {
+                            HeaderArticle = HeaderArticle,
+                            UrlArticle = page.CrawledPage.Uri.AbsoluteUri,
+                            FullText = page.CrawledPage.HtmlDocument.DocumentNode.OuterHtml,
+                            Text = articleText.Trim(),
+                            LastUpdated = date,
+                            EntityText = entityText,
+                        }
+                        );
                     }
                 }
-                */
-
-
             }
-           htmlAgilityPackDocument.DocumentNode.SelectNodes("//style|//script").ToList().ForEach(n => n.Remove());
-
-            var xpath = "//text()[not(normalize-space())]";
-            var emptyNodes = htmlAgilityPackDocument.DocumentNode.SelectNodes(xpath);
-
-            //replace each and all empty text nodes with single new-line text node
-            foreach (HtmlNode emptyNode in emptyNodes)
-            {
-                emptyNode.ParentNode
-                         .ReplaceChild(HtmlTextNode.CreateNode(Environment.NewLine)
-                                        , emptyNode
-                                       );
-            }
-
-            string FullText =  htmlAgilityPackDocument.DocumentNode.InnerHtml.AsString();
-
-            var bla = htmlAgilityPackDocument.DocumentNode.SelectSingleNode("//span[@class='news-date-time news_date']");
-            if (bla != null) {
-                date = DateTime.Parse(bla.InnerText);
-            }
-            if (HeaderArticle != "" & articleText != "")
-            {
-                using (var db = dbConnectionFactory.OpenDbConnection())
-                {
-                    db.Insert(new Article()
-                    {
-                        HeaderArticle = HeaderArticle,
-                        UrlArticle = page.CrawledPage.Uri.AbsoluteUri,
-                        FullText = page.CrawledPage.HtmlDocument.DocumentNode.OuterHtml,
-                        Text = articleText.Trim(),
-                        LastUpdated = date,
-                        EntityText = entityText,
-                    }
-                    );
-                }
+            catch (Exception e) {
+                Console.WriteLine("", e.Message);
             }
             
         }

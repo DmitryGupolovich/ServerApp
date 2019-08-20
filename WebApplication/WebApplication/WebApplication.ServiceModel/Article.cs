@@ -20,11 +20,10 @@ namespace WebApplication.ServiceModel
 
         [ServiceStack.DataAnnotations.StringLength(ServiceStack.DataAnnotations.StringLengthAttribute.MaxText)]
         public string FullText { get; set; }
-        [Column(TypeName = "ntext")]
-        [MaxLength]
+        [ServiceStack.DataAnnotations.StringLength(ServiceStack.DataAnnotations.StringLengthAttribute.MaxText)]
         public string Text { get; set; }
         public DateTime? LastUpdated { get; set; }
-
+        [ServiceStack.DataAnnotations.StringLength(ServiceStack.DataAnnotations.StringLengthAttribute.MaxText)]
         public string EntityText { get; set; }
 
         public static implicit operator List<object>(Article v)

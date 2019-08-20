@@ -38,12 +38,20 @@ namespace WebApplication.ServiceInterface
         }
         public object Any(GetArticleById getArticleById)
         {
-
             var result = repository.GetArticlesById(getArticleById.Id);
 
             return new GetArticleByIdResponse()
             { result = result.InList() };
 
         }
+        public object Any(GetArticleByWhatFind getArticleByWhatFind)
+        {
+            var result = repository.GetArticleByWhatFind(getArticleByWhatFind.WhatFind);
+
+            return new GetArticleByWhatFindResponse()
+            { result = result };
+
+        }
+
     }
 }
