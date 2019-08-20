@@ -17,6 +17,7 @@ using AngleSharp.Extensions;
 using EP.Ner;
 using EP.Ner.Core;
 using EP.Morph;
+using System.Text.RegularExpressions;
 namespace WebApplication.ServiceModel
 {
    public class Solver
@@ -32,7 +33,7 @@ namespace WebApplication.ServiceModel
             CrawlConfiguration crawlConfig = new CrawlConfiguration();
             crawlConfig.CrawlTimeoutSeconds = 0;
             crawlConfig.MaxConcurrentThreads = 20;
-            crawlConfig.MaxPagesToCrawl = 300;
+            crawlConfig.MaxPagesToCrawl = 100;
             crawlConfig.MaxCrawlDepth = 100;
 
             crawler = new PoliteWebCrawler(crawlConfig, null, null, null, null, null, null, null, null);
@@ -79,12 +80,22 @@ namespace WebApplication.ServiceModel
 
             Extract(e, htmlAgilityPackDocument);
         }
+        string RemoveQuotes(string articleText)
+        {
+            return Regex.Replace(articleText,"\"",String.Empty);
+
+        }
         void Extract(PageCrawlCompletedArgs page, HtmlDocument htmlAgilityPackDocument)
         {
             try
             {
                 DateTime date = default(DateTime);
-                string HeaderArticle = "", articleText = "", entityText = "";
+                string entityText = "";
+                StringBuilder text = new StringBuilder();
+
+                StringBuilder headerArticle = new StringBuilder();
+                StringBuilder articleText = new StringBuilder();
+
                 var t2 = htmlAgilityPackDocument.DocumentNode.SelectSingleNode("//div[@class='news-detail']");
                 if (t2 != null)
                 {
@@ -93,33 +104,36 @@ namespace WebApplication.ServiceModel
                     HtmlNode HeaderArticleNode = t2.SelectSingleNode(".//*[@class='name']");
                     if (HeaderArticleNode != null)
                     {
-                        HeaderArticle = HeaderArticleNode.InnerText;
+                        headerArticle.Append(RemoveQuotes(HeaderArticleNode.InnerText));
                     }
 
                     HtmlNode TextNode = t2.SelectSingleNode(".//*[@id='detailText']");
                     if (TextNode != null)
                     {
-                        articleText = TextNode.InnerText;
-
-
-                        ProcessorService.Initialize(MorphLang.RU | MorphLang.EN);
-                        EP.Ner.Geo.GeoAnalyzer.Initialize();
-                        EP.Ner.Org.OrganizationAnalyzer.Initialize();
-                        EP.Ner.Person.PersonAnalyzer.Initialize();
-
-                        //// создаём экземпляр обычного процессора
-                        using (Processor proc = ProcessorService.CreateProcessor())
+                        
+                        if (TextNode.InnerText != "")
                         {
-                            // анализируем текст
-                            AnalysisResult ar = proc.Process(new SourceOfAnalysis(articleText));
+                            
+                            articleText.Append(RemoveQuotes(TextNode.InnerText));
 
-                            // результирующие сущности
-                            foreach (var e in ar.Entities)
+                            ProcessorService.Initialize(MorphLang.RU | MorphLang.EN);
+                            EP.Ner.Geo.GeoAnalyzer.Initialize();
+                            EP.Ner.Org.OrganizationAnalyzer.Initialize();
+                            EP.Ner.Person.PersonAnalyzer.Initialize();
+
+                            //// создаём экземпляр обычного процессора
+                            using (Processor proc = ProcessorService.CreateProcessor())
                             {
-                                //  if (e.GetType().Name.Equals("GeoReferent"))
-                                //e.GetType().Name + " " + e;
-                                //entityText += entityText;
-                                entityText += e.ToString() + " ";
+                                // анализируем текст
+                                AnalysisResult ar = proc.Process(new SourceOfAnalysis(articleText.ToString().Trim()));
+
+                                // результирующие сущности
+                                foreach (var e in ar.Entities)
+                                {
+                                    //  if (e.GetType().Name.Equals("GeoReferent"))
+                                    //e.GetType().Name + " " + e;
+                                    entityText += e.ToString() + " ";
+                                }
                             }
                         }
 
@@ -162,16 +176,18 @@ namespace WebApplication.ServiceModel
                     bla.InnerHtml.ToString();
                     date = DateTime.Parse(bla.InnerText);
                 }
-                if (HeaderArticle != "" & articleText != "")
+                
+                if (headerArticle.Length != 0 & articleText.Length != 0)
                 {
                     using (var db = dbConnectionFactory.OpenDbConnection())
                     {
                         db.Insert(new Article()
                         {
-                            HeaderArticle = HeaderArticle,
+                           // HeaderArticle = HeaderArticle,
+                           HeaderArticle = headerArticle.ToString().Trim(),
                             UrlArticle = page.CrawledPage.Uri.AbsoluteUri,
                             FullText = page.CrawledPage.HtmlDocument.DocumentNode.OuterHtml,
-                            Text = articleText.Trim(),
+                            Text = articleText.ToString().Trim(),
                             LastUpdated = date,
                             EntityText = entityText,
                         }
